@@ -1,16 +1,11 @@
 from random import *
 from math import *
 import numpy as np
-import itertools
-range = lambda stop: iter(itertools.count().next, stop)
 
-"""
-gates = {G1 ... G10}
-wires = {W1 ... W20}
-"""
 AES_KEY_LENGTH = 128
 
-def evaluate_garbled_circuit(wires, gates, C, D):
+# assume wire 1 and wire 2 already populated with input A and B.
+def evaluate_garbled_circuit(wires, gates, C, D, output_1_p, output_2_p):
 	#possible_output = np.zeros((pow(2, num_inputs), num_inputs + num_outputs))
 	#for i in range(int(pow(2, num_inputs))):
 	#	for j in range(num_inputs, 0, -1):
@@ -18,13 +13,37 @@ def evaluate_garbled_circuit(wires, gates, C, D):
 
 	num_wires = len(wires)
 	num_gates = len(gates)
-	# random AES keys
-	#wire_keys = [[getrandbits(AES_KEY_LENGTH) for i in range(num_wires)] for j in range(2)]
-	# random p[w] value
-	#wire_p = [randint(0,1) for i in range(num_wires)]
-	# initialise input values of all wires to 0
-	#wire_values = np.zeros(num_wires)
 
+	# populate wire 3 and 4 with input C and D
+	wires[2].set_value(C ^ wires[2].p)
+	wires[2].set_decryption_key(wires[2].key[C])
+	wires[3].set_value(D ^ wires[3].p)
+	wires[3].set_decryption_key(wires[3].key[D])
+	for i in range(num_gates):
+		current_gate = gates[i]
+		garbled_table = current_gate.garbled_table
+		if (current_gate.gate_type == 'NOT'):
+			encrypted_key = garbled_table[current_gate.input_wires[0].value, 1]
+			encrypted_value = garbled_table[current_gate.input_wires[0].value, 2]
+			current_gate.output_wire.set_decryption_key(decrypt(current_gate.input_wires[0].decryption_key, encrypted_key))
+			current_gate.output_wire.set_value(decrypt(current_gate.input_wires[0].decryption_key, encrypted_value))
+		else:
+			for j in range(len(garbled_table)):
+				if (garbled_table[j,0] == current_gate.input_wires[0].value & garbled_table[j,1] == current_gate,input_wires[1].value):
+					encrypted_key = garbled_table[j, 2]
+					encrypted_value = garbled_table[j, 3]
+					break
+			current_gate.output_wire.set_decryption_key(decrypt(current_gate.input_wires[0].decryption_key, 
+				decrypt(current_gate.input_wires[1].decryption_key, encrypted_key)))
+			current_gate.output_wire.set_value(decrypt(current_gate.input_wires[0].decryption_key, 
+				decrypt(current_gate.input_wires[1].decryption_key, encrypted_value)))
+
+	# extract value from output wires
+	output_1 = wires[num_wires-2]
+	output_2 = wires[num_wires-1]
+	value_output_1 = output_1.value ^ output_1.p[output_1_p]
+	value_output_2 = output_2.value ^ output_2.p[output_2_p]
+	return([value_output_1, value_output_2])
 
 def encrypt(key, plaintext):
 	ciphertext = plaintext
@@ -41,6 +60,9 @@ class Wire:
 
 	def set_value(self, val):
 		self.value = val
+
+	def set_decryption_key(self, key):
+		self.decryption_key = key
 
 class Gate:
 	def __init__(self, gate_type, gate_func, input_wires, output_wire):
