@@ -2,8 +2,9 @@ from random import *
 from math import *
 from Crypto.Cipher import AES
 import numpy as np
+import string
 
-AES_KEY_LENGTH = 128
+AES_KEY_LENGTH = 16
 
 def generate_all_possible_output():
 	possible_output = np.zeros([16, 6], dtype=int)
@@ -31,16 +32,13 @@ def evaluate_garbled_circuit(wires, gates, C, D):
 		current_gate = gates[i]
 		garbled_table = current_gate.garbled_table
 		if (current_gate.gate_type == 'NOT'):
-			encrypted_key = garbled_table[current_gate.input_wires[0].value, 1]
-			encrypted_value = garbled_table[current_gate.input_wires[0].value, 2]
+			encrypted_key = garbled_table[current_gate.input_wires[0].value][0]
+			encrypted_value = garbled_table[current_gate.input_wires[0].value][1]
 			current_gate.output_wire.set_decryption_key(decrypt(current_gate.input_wires[0].decryption_key, encrypted_key))
 			current_gate.output_wire.set_value(decrypt(current_gate.input_wires[0].decryption_key, encrypted_value))
 		else:
-			for j in range(len(garbled_table)):
-				if (garbled_table[j,0] == current_gate.input_wires[0].value and garbled_table[j,1] == current_gate.input_wires[1].value):
-					encrypted_key = garbled_table[j, 2]
-					encrypted_value = garbled_table[j, 3]
-					break
+			encrypted_key = garbled_table[(current_gate.input_wires[0].value, current_gate.input_wires[1].value)][0]
+			encrypted_value = garbled_table[(current_gate.input_wires[0].value, current_gate.input_wires[1].value)][1]
 			current_gate.output_wire.set_decryption_key(decrypt(current_gate.input_wires[0].decryption_key, 
 				decrypt(current_gate.input_wires[1].decryption_key, encrypted_key)))
 			current_gate.output_wire.set_value(decrypt(current_gate.input_wires[0].decryption_key, 
@@ -76,7 +74,12 @@ def generate_max_garbled_circuit(A, B):
 	return([wires, gates])
 
 def encrypt(key, plaintext):
-	ciphertext = plaintext
+	print plaintext
+	aes = AES.new(key, AES.MODE_CBC, key)
+	if (len(str(plaintext)) == 1):
+		plaintext = "000000000000000" + str(plaintext)
+	ciphertext = aes.encrypt(str(plaintext))
+	print ciphertext
 	return(ciphertext)
 
 def decrypt(key, ciphertext):
@@ -94,7 +97,7 @@ def or_gate_function(input1, input2):
 
 class Wire:
 	def __init__(self):
-		self.key = [getrandbits(AES_KEY_LENGTH) for i in range(2)]
+		self.key = [(''.join(choice(string.lowercase) for x in range(AES_KEY_LENGTH))) for i in range(2)]
 		self.p = randint(0,1)
 
 	def set_value(self, val):
@@ -113,27 +116,24 @@ class Gate:
 
 	def generate_garbled_table(self):
 		if (self.gate_type == 'NOT'):
-			self.garbled_table = np.zeros((2, 3))
-			self.garbled_table[0, 0] = int(0)
-			self.garbled_table[1, 0] = int(1) 
+			self.garbled_table = {0: ["" for i in range(2)], 1: ["" for i in range(2)]}
 		else:
-			self.garbled_table = np.zeros((4, 4))
-			for i in range(4):
-				self.garbled_table[i, 0] = int(floor(i / 2))
-				self.garbled_table[i, 1] = int(fmod(i, 2))
+			self.garbled_table = {(0,0): ["" for i in range(2)], (0,1): ["" for i in range(2)],
+				(1,0): ["" for i in range(2)], (1,1): ["" for i in range(2)]}
 		for i in range(len(self.garbled_table)):
-			x = int(self.garbled_table[i][0]) ^ self.input_wires[0].p
 			if (self.gate_type == 'NOT'):
+				x = int(self.garbled_table.keys()[i]) ^ self.input_wires[0].p
 				z = self.gate_func(x)
 				t = z ^ self.output_wire.p
-				self.garbled_table[i, 1] = encrypt(self.input_wires[0].key[x], self.output_wire.key[z])
-				self.garbled_table[i, 2] = encrypt(self.input_wires[0].key[x], t)
+				self.garbled_table[i][0] = encrypt(self.input_wires[0].key[x], self.output_wire.key[z])
+				self.garbled_table[i][1] = encrypt(self.input_wires[0].key[x], t)
 			else:
-				y = int(self.garbled_table[i][1]) ^ self.input_wires[1].p
+				x = int(self.garbled_table.keys()[i][0]) ^ self.input_wires[0].p
+				y = int(self.garbled_table.keys()[i][1]) ^ self.input_wires[1].p
 				z = self.gate_func(x, y)
 				t = z ^ self.output_wire.p
-				self.garbled_table[i, 2] = self.encrypt_helper(x, y, self.output_wire.key[z])
-				self.garbled_table[i, 3] = self.encrypt_helper(x, y, t)
+				self.garbled_table[self.garbled_table.keys()[i]][0] = self.encrypt_helper(x, y, self.output_wire.key[z])
+				self.garbled_table[self.garbled_table.keys()[i]][1] = self.encrypt_helper(x, y, t)
 
 	def encrypt_helper(self, x, y, text):
 		return(encrypt(self.input_wires[0].key[x], encrypt(self.input_wires[1].key[y], text)))
